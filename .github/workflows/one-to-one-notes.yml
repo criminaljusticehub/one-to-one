@@ -1,0 +1,77 @@
+name: One to one notes
+
+on:
+  schedule:
+    - cron: 0 17 * * MON
+
+jobs:
+  one-to-one-notes:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set environment variables
+        run: |
+          # Set this to the number of weeks between your regular meetings.
+          #
+          # For example, if you have fortnightly meetings, set this to 2 and set
+          # the `MEETING_BASE_WEEK` to the Monday of a past week you had a
+          # meeting in.
+          echo "WEEKS_BETWEEN_MEETINGS=1" >> $GITHUB_ENV
+
+          # Set this to the date of the Monday of a past week with a
+          # meeting in it.
+          #
+          # Supports ISO 8601 format dates, e.g. "2020-01-31".
+          echo "MEETING_BASE_WEEK=TODO" >> $GITHUB_ENV
+
+          # Set these to the GitHub usernames of the people involved.
+          echo "MANAGER_GITHUB_USERNAME=TODO" >> $GITHUB_ENV
+          echo "REPORT_GITHUB_USERNAME=TODO" >> $GITHUB_ENV
+
+          # Don't touch these unless you know what you're doing.
+          echo "BRANCH_NAME=one-to-one/$(date --date "+$WEEKS_BETWEEN_MEETINGS week" '+%F')" >> $GITHUB_ENV
+          echo "FILE_NAME=$(date --date "+$WEEKS_BETWEEN_MEETINGS week" '+%F')-one-to-one.md" >> $GITHUB_ENV
+          echo "TITLE=1:1 on $(date --date "+$WEEKS_BETWEEN_MEETINGS week" '+%d %B %Y')" >> $GITHUB_ENV
+
+      - name: Check week
+        run: |
+          SECONDS_SINCE_BASE_WEEK=$(($(date '+%s') - $(date --date "$MEETING_BASE_WEEK" '+%s')))
+          WEEKS_SINCE_BASE_WEEK=$(($SECONDS_SINCE_BASE_WEEK / (60 * 60 * 24 * 7)))
+
+          if [ $(($WEEKS_SINCE_BASE_WEEK % $WEEKS_BETWEEN_MEETINGS)) = 0 ]; then
+            echo "RUN_THIS_TIME=1" >> $GITHUB_ENV
+          fi
+
+      - name: Checkout repository
+        if: env.RUN_THIS_TIME
+        uses: actions/checkout@v3
+
+      - name: Create new notes template file
+        if: env.RUN_THIS_TIME
+        run: |
+          cp meeting-notes/templates/one-to-one.md "meeting-notes/$FILE_NAME"
+          sed -i "s~{{TITLE}}~$TITLE~g" "meeting-notes/$FILE_NAME"
+
+      - name: Commit and push notes template file to new branch
+        if: env.RUN_THIS_TIME
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config --global user.email "$GITHUB_ACTOR@users.noreply.github.com"
+          git config --global user.name "$GITHUB_ACTOR"
+          git checkout -b "$BRANCH_NAME"
+          git add .
+          git commit -m "Create a meeting notes template"
+          git push --force --set-upstream "https://$GITHUB_ACTOR:$GITHUB_TOKEN@github.com/$GITHUB_REPOSITORY.git" "$BRANCH_NAME"
+
+      - name: Open pull request
+        if: env.RUN_THIS_TIME
+        uses: repo-sync/pull-request@v2.6
+        with:
+          source_branch: ${{ env.BRANCH_NAME }}
+          destination_branch: main
+          pr_title: ${{ env.TITLE }}
+          pr_body: Add any notes for the 1:1
+          pr_assignee:
+            ${{ env.MANAGER_GITHUB_USERNAME }},${{ env.REPORT_GITHUB_USERNAME }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
